@@ -29,27 +29,47 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
 
   ytsaurus:
-    image: ghcr.io/ytsaurus/local:stable
+    image: ghcr.io/ytsaurus/local:stable-spyt
+    platform: linux/amd64
     shm_size: "2g"
     environment:
       YT_USE_SINGLETON: "1"
       YT_ENABLE_HTTP_PROXY: "1"
     ports:
-      - "8003:8000"   # Web UI (Master/UI)
-      - "8004:80"     # HTTP-proxy REST API
+      - "80:80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   ytsaurus-ui:
-    image: ghcr.io/ytsaurus/ui:stable
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: local-ytsaurus-ui:latest
+    platform: linux/amd64
     depends_on:
-      - ytsaurus
+      ytsaurus:
+        condition: service_healthy
     ports:
       - "8080:80"
     volumes:
       - ./clusters-config.json:/opt/app/clusters-config.json:ro
+      - ./stages:/opt/app/stages:ro
+#      - ./secrets/yt-interface-secret.json:/opt/app/secrets/yt-interface-secret.json:ro
     environment:
       - NODE_ENV=production
+      - APP_ENV=production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   spark:
     image: bitnami/spark:3.3.2
@@ -78,3 +98,6 @@ services:
       - kafka
     volumes:
       - ./media:/media
+
+volumes:
+  minio-data:

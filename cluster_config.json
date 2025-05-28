@@ -1,8 +1,0 @@
-[
-  {
-    "name": "local",
-    "rpcProxyAddress": "http://ytsaurus:80",
-    "uiProxyAddress": "http://ytsaurus:80",
-    "isDefault": true
-  }
-]

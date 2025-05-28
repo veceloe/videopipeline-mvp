@@ -1,0 +1,11 @@
+{
+  "clusters": [
+    {
+      "id": "local",
+      "name": "Local YTsaurus",
+      "proxy": "ytsaurus:80",
+      "externalProxy": "localhost",
+      "stagesRoot": "/opt/app/stages"
+    }
+  ]
+}
