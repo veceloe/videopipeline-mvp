@@ -8,4 +8,4 @@ RUN apt-get update && \
 WORKDIR /app
 COPY producer.py .
 
-CMD ["python", "producer.py"] 
+CMD ["python", "-u", "producer.py"]
