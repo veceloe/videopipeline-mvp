@@ -6,7 +6,7 @@ lazy val root = (project in file("."))
     name := "videopipeline",
     libraryDependencies ++= {
       val sparkVersion = "3.3.2" // Твоя версия Spark
-      val spytVersion = "2.6.4"  // Твоя версия SPYT
+      val spytVersion = "2.6.3"  // Твоя версия SPYT
 
       Seq(
         "org.apache.spark" %% "spark-core" % sparkVersion % Provided,
