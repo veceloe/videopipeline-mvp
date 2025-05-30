@@ -1,6 +1,6 @@
 import org.apache.spark.sql.{SparkSession, DataFrame}
 import org.apache.spark.sql.functions._
-import java.nio.file.Files
+import java.nio.file.{Files, Paths}
 import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.hadoop.conf.Configuration
 
@@ -8,6 +8,7 @@ object VideoStreamProcessor {
   def main(args: Array[String]): Unit = {
 
     val ytProxyValue = "ytsaurus:80"
+    // 1. Устанавливаем системное свойство для yt.proxy (это сработало!)
     System.setProperty("yt.proxy", ytProxyValue)
     println(s"""PROGRAMMATICALLY SET System.setProperty("yt.proxy", "$ytProxyValue")""")
 
@@ -16,10 +17,16 @@ object VideoStreamProcessor {
     val spark = SparkSession.builder()
       .appName("VideoStreamProcessor")
       .master("local[*]")
-      .config("spark.yt.proxy", ytProxyValue)
+      // 2. Передаем конфигурации SPYT через SparkConf
+      .config("spark.yt.proxy", ytProxyValue) // Для SPYT connector
+      .config("spark.hadoop.yt.proxy", ytProxyValue) // Для Hadoop Configuration внутри Spark
+
+      // 3. ЯВНО УКАЗЫВАЕМ РЕАЛИЗАЦИИ FILESYSTEM ДЛЯ СХЕМЫ "yt" (КЛЮЧЕВОЕ ИЗМЕНЕНИЕ)
+      .config("spark.hadoop.fs.yt.impl", "tech.ytsaurus.spyt.fs.YtFileSystem")
+      .config("spark.hadoop.fs.AbstractFileSystem.yt.impl", "tech.ytsaurus.spyt.fs.YtAbstractFileSystem")
+
       .config("spark.yt.read.ignoreNullable", "true")
       .config("spark.yt.write.ignoreNullable", "true")
-      .config("spark.hadoop.yt.proxy", ytProxyValue) // Дублируем для HadoopConf
       .getOrCreate()
 
     println("SparkSession built successfully.")
@@ -27,27 +34,31 @@ object VideoStreamProcessor {
 
     val globalHConf = spark.sparkContext.hadoopConfiguration
 
-    println("---- Default FileSystem (from globalHConf) ----")
+    // ОТЛАДОЧНЫЙ БЛОК: Проверяем, что FileSystem для "yt" теперь находится
+    println("---- Attempting to get FileSystem for scheme 'yt' AFTER SparkSession init (from globalHConf) ----")
     try {
-      val defaultFs = FileSystem.get(globalHConf)
-      println(s"Default FS scheme: ${defaultFs.getScheme}, Class: ${defaultFs.getClass.getName}, URI: ${defaultFs.getUri}")
+      val ytFs = FileSystem.get(new java.net.URI("yt://any_cluster_name_for_test"), globalHConf)
+      println(s"Successfully got FS for scheme 'yt': ${ytFs.getScheme}, Class: ${ytFs.getClass.getName}, URI: ${ytFs.getUri}")
     } catch {
-      case e: Throwable => println(s"Error getting default FS: ${e.getMessage}")
+      case e: Throwable =>
+        println(s"ERROR getting FS for scheme 'yt': ${e.getMessage}")
+        e.printStackTrace() // Важно увидеть стек вызовов, если ошибка останется
     }
-
-    // УДАЛЕН ТЕСТОВЫЙ БЛОК ДЛЯ FileSystem.get("yt://...") ЗДЕСЬ
 
     println("---- SparkConf effective settings at Driver Start ----")
     spark.conf.getAll.foreach { case (k, v) =>
-      if (k.contains("yt.") || k.contains("s3a.")) {
+      if (k.contains("yt.") || k.contains("s3a.") || k.contains("fs.yt.impl")) { // Добавил fs.yt.impl для проверки
         println(s"SparkConf: $k = $v")
       }
     }
     println("---- HadoopConf effective settings at Driver Start (via SparkContext globalHConf) ----")
-    println(s"HadoopConf spark.hadoop.yt.proxy (from globalHConf): ${globalHConf.get("spark.hadoop.yt.proxy", "NOT SET IN globalHConf")}")
-    println(s"HadoopConf yt.proxy (direct from globalHConf): ${globalHConf.get("yt.proxy", "NOT SET IN globalHConf")}")
+    println(s"HadoopConf fs.yt.impl (from globalHConf): ${globalHConf.get("fs.yt.impl", "NOT SET")}")
+    println(s"HadoopConf fs.AbstractFileSystem.yt.impl (from globalHConf): ${globalHConf.get("fs.AbstractFileSystem.yt.impl", "NOT SET")}")
+    println(s"HadoopConf yt.proxy (direct from globalHConf): ${globalHConf.get("yt.proxy", "NOT SET")}")
     println(s"System Property yt.proxy (after programmatic set): ${System.getProperty("yt.proxy", "NOT SET AS SYSPROP")}")
 
+
+    // ==== S3 (MinIO) конфиги ====
     globalHConf.set("fs.s3a.endpoint", "http://minio:9000")
     globalHConf.set("fs.s3a.access.key", "minioadmin")
     globalHConf.set("fs.s3a.secret.key", "minioadmin")
@@ -57,6 +68,7 @@ object VideoStreamProcessor {
     globalHConf.set("fs.s3a.connection.timeout", "15000")
     globalHConf.set("fs.s3a.socket.timeout", "15000")
 
+    // ==== Kafka источник ====
     val kafkaDF = spark.readStream
       .format("kafka")
       .option("kafka.bootstrap.servers", "kafka:9092")
@@ -78,14 +90,12 @@ object VideoStreamProcessor {
 
         val batchSparkSession = batchDF.sparkSession
         import batchSparkSession.implicits._
-
         val batchHConf = batchSparkSession.sparkContext.hadoopConfiguration
 
         val s3Uri = new java.net.URI("s3a://video-bucket/")
         var s3fs: FileSystem = null
         try {
           s3fs = FileSystem.get(s3Uri, batchHConf)
-          println(s"[Batch $batchId] Successfully got S3 FileSystem for URI: $s3Uri, Class: ${s3fs.getClass.getName}")
         } catch {
           case e: Throwable =>
             println(s"[Batch $batchId] CRITICAL: Error getting S3 FileSystem: ${e.getMessage}")
@@ -115,28 +125,22 @@ object VideoStreamProcessor {
               println(s"[Batch $batchId] Copied $name to S3: $s3TargetPathStr")
 
               println(s"[Batch $batchId] Attempting to write metadata for $name to YTsaurus...")
-              val ytProxySparkConfBatch = batchSparkSession.conf.getOption("spark.yt.proxy").getOrElse("NOT SET IN SPARK_CONF for batch")
-              val ytProxyHadoopConfSparkBatch = batchSparkSession.conf.getOption("spark.hadoop.yt.proxy").getOrElse("NOT SET IN SPARK_CONF (for spark.hadoop.yt.proxy) for batch")
-              val ytProxyHadoopConfDirectBatch = batchHConf.get("yt.proxy", "NOT SET IN batchHConf (direct) for batch")
-              val ytProxySysPropCheckBatch = System.getProperty("yt.proxy", "NOT SET AS SYSPROP for batch")
+              // Отладка: Проверяем, что Hadoop конфигурация внутри батча содержит нужные YT настройки
+              println(s"[Batch $batchId] (in-batch) batchHConf fs.yt.impl: ${batchHConf.get("fs.yt.impl", "NOT SET IN BATCH_HCONF")}")
+              println(s"[Batch $batchId] (in-batch) batchHConf fs.AbstractFileSystem.yt.impl: ${batchHConf.get("fs.AbstractFileSystem.yt.impl", "NOT SET IN BATCH_HCONF")}")
+              println(s"[Batch $batchId] (in-batch) batchHConf yt.proxy: ${batchHConf.get("yt.proxy", "NOT SET IN BATCH_HCONF")}")
+              println(s"[Batch $batchId] (in-batch) System Property yt.proxy: ${System.getProperty("yt.proxy", "NOT SET AS SYSPROP for batch")}")
 
-              println(s"[Batch $batchId] (in-batch) YTsaurus proxy from SparkConf (spark.yt.proxy): $ytProxySparkConfBatch")
-              println(s"[Batch $batchId] (in-batch) YTsaurus proxy from SparkConf (spark.hadoop.yt.proxy): $ytProxyHadoopConfSparkBatch")
-              println(s"[Batch $batchId] (in-batch) YTsaurus proxy from current batchHConf (yt.proxy): $ytProxyHadoopConfDirectBatch")
-              println(s"[Batch $batchId] (in-batch) YTsaurus proxy from System Property: $ytProxySysPropCheckBatch")
 
               val metaDataSeq = Seq((name, System.currentTimeMillis(), bytes.length))
               val meta = batchSparkSession.createDataFrame(metaDataSeq)
                 .toDF("segment_name", "timestamp_ms", "size_bytes")
 
-              println(s"[Batch $batchId] DataFrame to write to YT for $name:")
-              // meta.show(false)
-
               meta.write
                 .format("yt")
                 .mode("append")
                 .option("path", "yt://home/video_metadata") // Используем схему yt://
-                .option("ignoreNullable", "true")
+                .option("ignoreNullable", "true") // Полезно
                 .save()
               println(s"[Batch $batchId] Successfully saved metadata for $name to YTsaurus.")
 
@@ -146,12 +150,7 @@ object VideoStreamProcessor {
                 e.printStackTrace()
             } finally {
               if (localTmpPath != null && Files.exists(localTmpPath)) {
-                try {
-                  Files.delete(localTmpPath)
-                  println(s"[Batch $batchId] Deleted temporary file: $localTmpPath for segment $name")
-                } catch {
-                  case e: Throwable => println(s"[Batch $batchId] Error deleting temporary file $localTmpPath for segment $name: ${e.getMessage}")
-                }
+                try { Files.delete(localTmpPath) } catch { case e: Throwable => println(s"[Batch $batchId] Error deleting temp file $localTmpPath: ${e.getMessage}") }
               }
             }
           }

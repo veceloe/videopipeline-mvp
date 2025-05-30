@@ -1,7 +1,7 @@
 services:
   zookeeper:
     image: bitnami/zookeeper:3.9
-    platform: linux/arm64
+    platform: linux/amd64
     ports:
       - "2181:2181"
     environment:
@@ -9,7 +9,7 @@ services:
 
   kafka:
     image: bitnami/kafka:3.7
-    platform: linux/arm64
+    platform: linux/amd64
     depends_on:
       - zookeeper
     ports:
@@ -32,7 +32,7 @@ services:
 
   minio:
     image: quay.io/minio/minio:latest
-    platform: linux/arm64
+    platform: linux/amd64
     command: server /data --console-address ":9001"
     ports:
       - "9000:9000"
@@ -88,7 +88,7 @@ services:
 
   spark:
     image: bitnami/spark:3.3.2
-    platform: linux/arm64
+    platform: linux/amd64
     depends_on:
       kafka:
         condition: service_healthy
@@ -105,7 +105,7 @@ services:
     command: >
       spark-submit
         --class VideoStreamProcessor
-        --master local[*] 
+        --master local[*]
         /opt/spark/app/videopipeline.jar
 
   producer:
