@@ -1,7 +1,7 @@
 services:
   zookeeper:
     image: bitnami/zookeeper:3.9
-    platform: linux/amd64
+    platform: linux/arm64
     ports:
       - "2181:2181"
     environment:
@@ -9,7 +9,7 @@ services:
 
   kafka:
     image: bitnami/kafka:3.7
-    platform: linux/amd64
+    platform: linux/arm64
     depends_on:
       - zookeeper
     ports:
@@ -32,7 +32,7 @@ services:
 
   minio:
     image: quay.io/minio/minio:latest
-    platform: linux/amd64
+    platform: linux/arm64
     command: server /data --console-address ":9001"
     ports:
       - "9000:9000"
@@ -68,7 +68,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: local-ytsaurus-ui:latest
-    platform: linux/amd64
+    platform: linux/arm64
     depends_on:
       ytsaurus:
         condition: service_healthy
@@ -88,7 +88,7 @@ services:
 
   spark:
     image: bitnami/spark:3.3.2
-    platform: linux/amd64
+    platform: linux/arm64
     depends_on:
       kafka:
         condition: service_healthy
@@ -110,7 +110,7 @@ services:
 
   producer:
     build: ./producer
-    platform: linux/amd64
+    platform: linux/arm64
     depends_on:
       kafka:
         condition: service_healthy

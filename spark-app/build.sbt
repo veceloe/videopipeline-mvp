@@ -5,35 +5,25 @@ lazy val root = (project in file("."))
   .settings(
     name := "videopipeline",
     libraryDependencies ++= {
-      val sparkVersion = "3.3.2" // Твоя версия Spark
-      val spytVersion = "2.6.3"  // Твоя версия SPYT
-
+      val sparkVersion = "3.3.2"
+      val spytVersion = "2.6.3"
       Seq(
         "org.apache.spark" %% "spark-core" % sparkVersion % Provided,
         "org.apache.spark" %% "spark-sql"  % sparkVersion % Provided,
-        "org.apache.spark" %% "spark-sql-kafka-0-10" % sparkVersion, // Нужен в JAR
-
-        "org.apache.hadoop" % "hadoop-aws" % "3.3.2", // Для S3A
-
-        // SPYT библиотеки - НЕ Provided, они нужны в твоем JAR для клиентского режима
+        "org.apache.spark" %% "spark-sql-kafka-0-10" % sparkVersion,
+        "org.apache.hadoop" % "hadoop-aws" % "3.3.2",
         "tech.ytsaurus" %% "spark-yt-data-source-base" % spytVersion,
         "tech.ytsaurus" %% "spark-yt-data-source-extended" % spytVersion,
         "tech.ytsaurus" %% "spark-yt-spark-adapter-impl-330" % spytVersion,
-
         "tech.ytsaurus" % "ytsaurus-client" % "1.2.9"
       )
     },
     assembly / assemblyMergeStrategy := {
       case PathList("org", "apache", "spark", "unused", "UnusedStubClass.class") => MergeStrategy.first
-
-      // Специальная обработка для сервисных файлов Hadoop FileSystem
       case x if x.equals("META-INF/services/org.apache.hadoop.fs.FileSystem") =>
-        MergeStrategy.filterDistinctLines // <-- ВАЖНО!
-
-      // Общая стратегия для других сервисных файлов
+        MergeStrategy.filterDistinctLines
       case x if x.startsWith("META-INF/services/") =>
         MergeStrategy.concat
-
       case PathList("META-INF", xs @ _*) =>
         xs map {_.toLowerCase} match {
           case ("manifest.mf" :: Nil) | ("index.list" :: Nil) | ("dependencies" :: Nil) => MergeStrategy.discard
@@ -45,7 +35,6 @@ lazy val root = (project in file("."))
       case PathList("META-INF", "versions", _, "module-info.class") => MergeStrategy.discard
       case x if x.toLowerCase.startsWith("meta-inf/license") => MergeStrategy.first
       case x if x.toLowerCase.startsWith("meta-inf/notice") => MergeStrategy.first
-
       case x =>
         val oldStrategy = (assembly / assemblyMergeStrategy).value
         oldStrategy(x)

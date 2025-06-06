@@ -11,7 +11,6 @@ RETRY_DELAY_SECONDS = 5
 
 os.makedirs(SEG_DIR, exist_ok=True)
 
-# 1. запустить ffmpeg-сегментацию в фоне
 seg_cmd = [
     "ffmpeg", "-loglevel", "quiet", "-re", "-stream_loop", "-1",
     "-i", VIDEO, "-c", "copy",
@@ -20,19 +19,15 @@ seg_cmd = [
 ]
 subprocess.Popen(seg_cmd)
 
-# 2. Kafka-продюсер (байтовый value)
 producer = None
 for attempt in range(MAX_RETRIES):
     try:
         producer = KafkaProducer(
             bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
             key_serializer=lambda k: k.encode(),
-            value_serializer=lambda v: v,  # raw bytes
-            # Увеличим таймауты для подключения, если Kafka медленно стартует
-            reconnect_backoff_ms=1000, # ms to wait before re-attempting connection to a broker
-            retry_backoff_ms=1000, # ms to wait before retrying a request
-            # metadata_max_age_ms=300000, # The period of time in milliseconds after which we force a refresh of metadata even if we haven't seen any partition leadership changes
-            # request_timeout_ms=30000 # The configuration controls the maximum amount of time the client will wait for the response of a request
+            value_serializer=lambda v: v,
+            reconnect_backoff_ms=1000,
+            retry_backoff_ms=1000,
         )
         print(f"Kafka producer connected to {KAFKA_BOOTSTRAP_SERVERS}")
         break
